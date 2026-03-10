@@ -1,7 +1,10 @@
 """
 c3d_loader.py
 ─────────────
-Core loader and caching layer for C3D files using ezc3d.
+Core loader and caching layer for C3D files.
+Uses the pure-Python `c3d` package (no compilation needed, Python 3.14 compatible).
+Outputs the same data structure as the previous ezc3d-based version so all
+other modules (marker_analysis, analog_analysis, visualization) work unchanged.
 """
 
 import io
@@ -10,74 +13,214 @@ import pandas as pd
 import streamlit as st
 
 try:
-    import ezc3d
-    EZC3D_AVAILABLE = True
+    import c3d as c3d_lib
+    C3D_AVAILABLE = True
 except ImportError:
-    EZC3D_AVAILABLE = False
+    C3D_AVAILABLE = False
+
+
+# ── Internal reader ───────────────────────────────────────────────────────────
+
+def _read_c3d(file_bytes: bytes) -> dict:
+    """
+    Parse a C3D file and return a dict that mimics the ezc3d structure:
+
+    {
+        "header":     { nb_frames, first_frame, last_frame, frame_rate },
+        "parameters": { GROUP: { KEY: {"value": ...} } },
+        "data": {
+            "points":  ndarray (4, n_markers, n_frames)   – X Y Z residual
+            "analogs": ndarray (1, n_channels, n_analog_frames)
+        }
+    }
+    """
+    reader = c3d_lib.Reader(io.BytesIO(file_bytes))
+    hdr = reader.header
+
+    # ── Parameter helpers ─────────────────────────────────────────────────────
+    def _grp(name):
+        return reader.groups.get(name.upper())
+
+    def _par(group_name, param_name):
+        g = _grp(group_name)
+        if g is None:
+            return None
+        return g.params.get(param_name.upper())
+
+    def _strings(group_name, param_name):
+        p = _par(group_name, param_name)
+        if p is None:
+            return []
+        try:
+            return [s.strip() for s in p.string_array]
+        except Exception:
+            return []
+
+    def _floats(group_name, param_name):
+        p = _par(group_name, param_name)
+        if p is None:
+            return []
+        for attr in ("float_array", "int16_array", "uint16_array"):
+            try:
+                a = getattr(p, attr, None)
+                if a is not None and a.size:
+                    return list(a.flatten().astype(float))
+            except Exception:
+                pass
+        return []
+
+    def _raw_array(group_name, param_name):
+        p = _par(group_name, param_name)
+        if p is None:
+            return None
+        for attr in ("float_array", "int16_array", "uint16_array", "int8_array"):
+            try:
+                a = getattr(p, attr, None)
+                if a is not None and a.size:
+                    return a.astype(float)
+            except Exception:
+                pass
+        return None
+
+    # ── Frame rate & header ───────────────────────────────────────────────────
+    frame_rate  = float(hdr.frame_rate) if hdr.frame_rate else 100.0
+    first_frame = int(hdr.first_frame)
+    last_frame  = int(hdr.last_frame)
+
+    # ── Read frames ───────────────────────────────────────────────────────────
+    all_points  = []
+    all_analogs = []
+    for _i, points, analog in reader.read_frames():
+        all_points.append(points)   # (n_markers, 5): x,y,z,residual,camera
+        all_analogs.append(analog)  # (n_channels, samples_per_frame)
+
+    n_frames = len(all_points)
+
+    if n_frames > 0:
+        pts_stack = np.stack(all_points, axis=0)    # (n_frames, n_markers, 5)
+        pts_out = np.stack([
+            pts_stack[:, :, 0].T,   # X  → (n_markers, n_frames)
+            pts_stack[:, :, 1].T,   # Y
+            pts_stack[:, :, 2].T,   # Z
+            pts_stack[:, :, 3].T,   # residual (-1 = invalid)
+        ], axis=0)                  # (4, n_markers, n_frames)
+
+        ana_stack = np.concatenate(all_analogs, axis=1)  # (n_channels, total_analog_frames)
+        ana_out   = ana_stack[np.newaxis, :, :]           # (1, n_channels, n_analog_frames)
+    else:
+        pts_out = np.zeros((4, 0, 0))
+        ana_out = np.zeros((1, 0, 0))
+
+    n_markers  = pts_out.shape[1]
+    n_channels = ana_out.shape[1]
+
+    # ── Labels ────────────────────────────────────────────────────────────────
+    marker_labels = _strings("POINT",  "LABELS") or [f"M{i}" for i in range(n_markers)]
+    analog_labels = _strings("ANALOG", "LABELS") or [f"A{i}" for i in range(n_channels)]
+
+    point_rate   = _floats("POINT",  "RATE")  or [frame_rate]
+    point_units  = _strings("POINT", "UNITS") or ["mm"]
+    analog_rate  = _floats("ANALOG", "RATE")  or [frame_rate]
+    analog_units = _strings("ANALOG","UNITS") or []
+
+    fp_used    = _floats("FORCE_PLATFORM", "USED") or [0]
+    fp_type    = _floats("FORCE_PLATFORM", "TYPE") or []
+    fp_channel = _raw_array("FORCE_PLATFORM", "CHANNEL")
+    fp_corners = _raw_array("FORCE_PLATFORM", "CORNERS")
+    fp_origin  = _raw_array("FORCE_PLATFORM", "ORIGIN")
+
+    def v(val):
+        return {"value": val}
+
+    return {
+        "header": {
+            "nb_frames":   n_frames,
+            "first_frame": first_frame,
+            "last_frame":  last_frame,
+            "frame_rate":  frame_rate,
+        },
+        "parameters": {
+            "POINT": {
+                "LABELS": v(marker_labels),
+                "USED":   v([n_markers]),
+                "RATE":   v(point_rate),
+                "UNITS":  v(point_units),
+            },
+            "ANALOG": {
+                "LABELS": v(analog_labels),
+                "USED":   v([n_channels]),
+                "RATE":   v(analog_rate),
+                "UNITS":  v(analog_units),
+            },
+            "FORCE_PLATFORM": {
+                "USED":    v(fp_used),
+                "TYPE":    v(fp_type),
+                "CHANNEL": v(fp_channel),
+                "CORNERS": v(fp_corners),
+                "ORIGIN":  v(fp_origin),
+            },
+            "SUBJECTS": {
+                "NAMES": v(_strings("SUBJECTS", "NAMES")),
+            },
+            "TRIAL": {
+                "ACTUAL_START_FIELD": v([None]),
+            },
+            "MANUFACTURER": {
+                "COMPANY":  v(_strings("MANUFACTURER", "COMPANY")  or ["Unknown"]),
+                "SOFTWARE": v(_strings("MANUFACTURER", "SOFTWARE") or ["Unknown"]),
+            },
+        },
+        "data": {
+            "points":  pts_out,
+            "analogs": ana_out,
+        },
+    }
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def load_c3d(file_bytes: bytes):
-    """Load a C3D file from raw bytes and return the ezc3d object."""
-    if not EZC3D_AVAILABLE:
-        raise ImportError("ezc3d is not installed. Run: pip install ezc3d")
-    tmp = io.BytesIO(file_bytes)
-    # ezc3d needs a file path – write to a temp file
-    import tempfile, os
-    with tempfile.NamedTemporaryFile(suffix=".c3d", delete=False) as f:
-        f.write(file_bytes)
-        tmp_path = f.name
-    try:
-        c3d = ezc3d.c3d(tmp_path)
-    finally:
-        os.unlink(tmp_path)
-    return c3d
+def load_c3d(file_bytes: bytes) -> dict:
+    """Load a C3D file from raw bytes and return a structured dict."""
+    if not C3D_AVAILABLE:
+        raise ImportError(
+            "The 'c3d' package is not installed.  Run: pip install c3d"
+        )
+    return _read_c3d(file_bytes)
 
 
 def get_file_metadata(c3d) -> dict:
-    """Extract header and parameter metadata."""
     header = c3d["header"]
     params = c3d["parameters"]
 
-    # Safe key extraction helpers
     def pget(group, key, default=None):
         try:
             return params[group][key]["value"]
         except (KeyError, TypeError):
             return default
 
-    # Subjects / trial info
-    subjects = pget("SUBJECTS", "NAMES", [])
-    trial    = pget("TRIAL",    "ACTUAL_START_FIELD", [None])[0]
+    subjects    = pget("SUBJECTS", "NAMES", [])
+    n_frames    = header["nb_frames"]
+    first_frame = header["first_frame"]
+    last_frame  = header["last_frame"]
+    frame_rate  = header["frame_rate"]
+    duration    = n_frames / frame_rate if frame_rate else 0
 
-    # Frame info
-    n_frames   = header["nb_frames"]
-    first_frame= header["first_frame"]
-    last_frame = header["last_frame"]
-    frame_rate = header["frame_rate"]
-    duration   = n_frames / frame_rate if frame_rate else 0
-
-    # Markers
     marker_labels = pget("POINT", "LABELS",  [])
     n_markers     = pget("POINT", "USED",    [0])[0]
     point_rate    = pget("POINT", "RATE",    [frame_rate])[0]
     point_unit    = pget("POINT", "UNITS",   ["mm"])[0] if pget("POINT", "UNITS") else "mm"
 
-    # Analog
     analog_labels = pget("ANALOG", "LABELS", [])
     n_analog      = pget("ANALOG", "USED",   [0])[0]
     analog_rate   = pget("ANALOG", "RATE",   [0])[0]
     analog_units  = pget("ANALOG", "UNITS",  [])
 
-    # Force plates
-    fp_used = pget("FORCE_PLATFORM", "USED", [0])
-    n_fp    = int(fp_used[0]) if fp_used else 0
-    fp_type = pget("FORCE_PLATFORM", "TYPE", [])
+    fp_used    = pget("FORCE_PLATFORM", "USED", [0])
+    n_fp       = int(fp_used[0]) if fp_used else 0
+    fp_type    = pget("FORCE_PLATFORM", "TYPE", [])
     fp_corners = pget("FORCE_PLATFORM", "CORNERS", None)
 
-    # Manufacturer
     manufacturer = pget("MANUFACTURER", "COMPANY",  ["Unknown"])[0] if pget("MANUFACTURER", "COMPANY") else "Unknown"
     software     = pget("MANUFACTURER", "SOFTWARE", ["Unknown"])[0] if pget("MANUFACTURER", "SOFTWARE") else "Unknown"
 
@@ -105,11 +248,7 @@ def get_file_metadata(c3d) -> dict:
 
 
 def get_marker_data(c3d) -> pd.DataFrame:
-    """
-    Return marker 3-D positions as a DataFrame.
-    Shape: (n_frames,) index, columns = MultiIndex (marker, axis)
-    """
-    pts = c3d["data"]["points"]          # shape (4, n_markers, n_frames)
+    pts    = c3d["data"]["points"]      # (4, n_markers, n_frames)
     params = c3d["parameters"]
     try:
         labels = [str(l).strip() for l in params["POINT"]["LABELS"]["value"]]
@@ -118,24 +257,21 @@ def get_marker_data(c3d) -> pd.DataFrame:
 
     n_frames  = pts.shape[2]
     n_markers = pts.shape[1]
-    # Trim labels to actual markers
-    labels = labels[:n_markers]
+    labels    = labels[:n_markers]
 
     frame_rate = float(c3d["header"]["frame_rate"])
-    times = np.arange(n_frames) / frame_rate
+    times      = np.arange(n_frames) / frame_rate
 
-    cols = pd.MultiIndex.from_product([labels, ["X", "Y", "Z", "Res"]],
-                                      names=["marker", "axis"])
     data = {}
     for i, lbl in enumerate(labels):
         data[(lbl, "X")]   = pts[0, i, :]
         data[(lbl, "Y")]   = pts[1, i, :]
         data[(lbl, "Z")]   = pts[2, i, :]
-        data[(lbl, "Res")] = pts[3, i, :]   # residual (quality)
+        data[(lbl, "Res")] = pts[3, i, :]
 
     df = pd.DataFrame(data, index=times)
     df.index.name = "time_s"
-    # Replace invalid (residual == -1) with NaN
+
     for lbl in labels:
         mask = df[(lbl, "Res")] < 0
         df.loc[mask, (lbl, "X")] = np.nan
@@ -145,20 +281,16 @@ def get_marker_data(c3d) -> pd.DataFrame:
 
 
 def get_analog_data(c3d) -> pd.DataFrame:
-    """
-    Return analog signals as a DataFrame.
-    Shape: (n_analog_frames,) index, columns = channel labels
-    """
-    analog = c3d["data"]["analogs"]      # shape (1, n_channels, n_analog_frames)
+    analog = c3d["data"]["analogs"]     # (1, n_channels, n_analog_frames)
     params = c3d["parameters"]
     try:
         labels = [str(l).strip() for l in params["ANALOG"]["LABELS"]["value"]]
     except (KeyError, TypeError):
         labels = [f"A{i}" for i in range(analog.shape[1])]
 
-    n_ch     = analog.shape[1]
-    n_af     = analog.shape[2]
-    labels   = labels[:n_ch]
+    n_ch   = analog.shape[1]
+    n_af   = analog.shape[2]
+    labels = labels[:n_ch]
 
     try:
         analog_rate = float(params["ANALOG"]["RATE"]["value"][0])
@@ -166,24 +298,18 @@ def get_analog_data(c3d) -> pd.DataFrame:
         analog_rate = float(c3d["header"]["frame_rate"])
 
     times = np.arange(n_af) / analog_rate
-    df = pd.DataFrame(analog[0, :n_ch, :].T, index=times, columns=labels)
+    df    = pd.DataFrame(analog[0, :n_ch, :].T, index=times, columns=labels)
     df.index.name = "time_s"
     return df
 
 
 def get_force_plate_data(c3d, metadata: dict) -> list[dict]:
-    """
-    Extract per-force-plate data (Fx, Fy, Fz, Mx, My, Mz, COPx, COPy).
-    Returns a list of dicts, one per plate.
-    """
     n_fp = metadata["n_force_plates"]
     if n_fp == 0:
         return []
 
-    analog_df   = get_analog_data(c3d)
-    analog_rate = metadata["analog_rate"]
-
-    params = c3d["parameters"]
+    analog_df = get_analog_data(c3d)
+    params    = c3d["parameters"]
 
     def pget(group, key, default=None):
         try:
@@ -192,22 +318,21 @@ def get_force_plate_data(c3d, metadata: dict) -> list[dict]:
             return default
 
     ch_per_plate = pget("FORCE_PLATFORM", "CHANNEL", None)
-    corners      = pget("FORCE_PLATFORM", "CORNERS", None)  # (3, 4, n_fp)
-    origin       = pget("FORCE_PLATFORM", "ORIGIN",  None)  # (3, n_fp)
+    corners      = pget("FORCE_PLATFORM", "CORNERS", None)
+    origin       = pget("FORCE_PLATFORM", "ORIGIN",  None)
 
     plates = []
     for p in range(n_fp):
         result = {"plate_index": p}
-        result["corners"] = corners[:, :, p] if corners is not None else None
-        result["origin"]  = origin[:, p]     if origin  is not None else None
+        result["corners"] = corners[:, :, p] if (corners is not None and hasattr(corners, 'ndim') and corners.ndim == 3) else None
+        result["origin"]  = origin[:, p]     if (origin  is not None and hasattr(origin,  'ndim') and origin.ndim  == 2) else None
 
-        # Channel mapping – typically 6 or 8 channels per plate (0-based idx in c3d)
         if ch_per_plate is not None:
             chs = np.array(ch_per_plate).flatten()
-            # Reshape by n_fp plates
             try:
                 chs = chs.reshape(n_fp, -1)[p]
-                ch_names = [analog_df.columns[int(c) - 1] for c in chs if 0 < int(c) <= len(analog_df.columns)]
+                ch_names = [analog_df.columns[int(c) - 1]
+                            for c in chs if 0 < int(c) <= len(analog_df.columns)]
                 sub = analog_df[ch_names].copy()
                 sub.columns = [f"Ch{i+1}" for i in range(len(ch_names))]
             except Exception:
@@ -215,7 +340,6 @@ def get_force_plate_data(c3d, metadata: dict) -> list[dict]:
         else:
             sub = pd.DataFrame()
 
-        # Try to map Fx,Fy,Fz,Mx,My,Mz from known patterns
         fp_dict = _map_force_channels(sub, analog_df, p, params)
         result.update(fp_dict)
         plates.append(result)
@@ -223,11 +347,8 @@ def get_force_plate_data(c3d, metadata: dict) -> list[dict]:
     return plates
 
 
-# ── Private helpers ───────────────────────────────────────────────────────────
-
 def _map_force_channels(sub: pd.DataFrame, analog_df: pd.DataFrame,
                         plate_idx: int, params) -> dict:
-    """Attempt to identify Fx/Fy/Fz/Mx/My/Mz columns."""
     result = {}
     n_ch = len(sub.columns)
 
@@ -240,7 +361,6 @@ def _map_force_channels(sub: pd.DataFrame, analog_df: pd.DataFrame,
         result["Mz"] = sub.iloc[:, 5].values
         result["time_s"] = sub.index.values
 
-        # Compute COP (centre of pressure)
         Fx = result["Fx"]; Fy = result["Fy"]; Fz = result["Fz"]
         Mx = result["Mx"]; My = result["My"]
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -248,9 +368,7 @@ def _map_force_channels(sub: pd.DataFrame, analog_df: pd.DataFrame,
             cop_y = np.where(np.abs(Fz) > 10,  Mx / Fz, np.nan)
         result["COPx"] = cop_x
         result["COPy"] = cop_y
-
-        # Resultant GRF
-        result["GRF"] = np.sqrt(Fx**2 + Fy**2 + Fz**2)
+        result["GRF"]  = np.sqrt(Fx**2 + Fy**2 + Fz**2)
     else:
         result["time_s"] = sub.index.values if len(sub) else np.array([])
 
