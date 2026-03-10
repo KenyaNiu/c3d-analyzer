@@ -1,0 +1,274 @@
+/* C3D Analyzer - Custom Styles */
+
+/* Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
+/* ── Root Variables ─────────────────────────────── */
+:root {
+  --bg-primary:   #F0F4F8;
+  --bg-card:      #FFFFFF;
+  --bg-subtle:    #E8EDF3;
+  --border:       #D1DCE8;
+  --accent-blue:  #0EA5E9;
+  --accent-indigo:#6366F1;
+  --accent-teal:  #0D9488;
+  --accent-amber: #F59E0B;
+  --accent-rose:  #F43F5E;
+  --accent-emerald:#10B981;
+  --text-primary: #1E293B;
+  --text-secondary:#475569;
+  --text-muted:   #94A3B8;
+  --shadow-sm:    0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:    0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.04);
+  --shadow-lg:    0 12px 32px rgba(0,0,0,.10), 0 4px 8px rgba(0,0,0,.05);
+  --radius:       12px;
+  --radius-sm:    8px;
+  --radius-lg:    16px;
+}
+
+/* ── Global ─────────────────────────────────────── */
+html, body, [data-testid="stApp"] {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Hide Streamlit branding */
+#MainMenu, footer, header { visibility: hidden; }
+.stDeployButton { display: none; }
+
+/* ── Sidebar ────────────────────────────────────── */
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFD 100%);
+  border-right: 1px solid var(--border);
+}
+[data-testid="stSidebar"] .stMarkdown h3 {
+  color: var(--accent-blue);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.25rem;
+}
+
+/* ── Metric Cards ───────────────────────────────── */
+[data-testid="metric-container"] {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s ease;
+}
+[data-testid="metric-container"]:hover {
+  box-shadow: var(--shadow-md);
+}
+[data-testid="metric-container"] [data-testid="stMetricLabel"] {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+[data-testid="metric-container"] [data-testid="stMetricDelta"] {
+  font-size: 0.8rem;
+}
+
+/* ── Buttons ────────────────────────────────────── */
+.stButton > button {
+  background: linear-gradient(135deg, var(--accent-blue) 0%, #0284C7 100%);
+  color: #FFFFFF;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  font-size: 0.875rem;
+  letter-spacing: 0.01em;
+  padding: 0.5rem 1.25rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(14,165,233,.3);
+}
+.stButton > button:hover {
+  background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(14,165,233,.4);
+}
+.stButton > button:active {
+  transform: translateY(0);
+}
+
+/* ── File Uploader ──────────────────────────────── */
+[data-testid="stFileUploader"] {
+  background: var(--bg-card);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  transition: border-color 0.2s ease;
+}
+[data-testid="stFileUploader"]:hover {
+  border-color: var(--accent-blue);
+}
+
+/* ── Tabs ───────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+  background: var(--bg-subtle);
+  border-radius: var(--radius);
+  padding: 4px;
+  gap: 2px;
+  border: 1px solid var(--border);
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  padding: 0.4rem 0.9rem;
+}
+.stTabs [aria-selected="true"] {
+  background: var(--bg-card) !important;
+  color: var(--accent-blue) !important;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── DataFrames ─────────────────────────────────── */
+[data-testid="stDataFrame"] {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.dvn-scroller { border-radius: var(--radius); }
+
+/* ── Expanders ──────────────────────────────────── */
+[data-testid="stExpander"] {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 0.75rem;
+}
+[data-testid="stExpander"] summary {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── Select / Input ─────────────────────────────── */
+[data-baseweb="select"] > div {
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+[data-baseweb="select"] > div:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(14,165,233,.15);
+}
+[data-baseweb="input"] input {
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+/* ── Sliders ────────────────────────────────────── */
+[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+/* ── Plotly charts ──────────────────────────────── */
+.js-plotly-plot .plotly .main-svg {
+  border-radius: var(--radius);
+}
+
+/* ── Custom card ────────────────────────────────── */
+.analysis-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 1rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.badge-blue   { background:#DBEAFE; color:#1D4ED8; }
+.badge-green  { background:#D1FAE5; color:#065F46; }
+.badge-amber  { background:#FEF3C7; color:#92400E; }
+.badge-rose   { background:#FFE4E6; color:#9F1239; }
+.badge-indigo { background:#E0E7FF; color:#3730A3; }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.section-header h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.section-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Info / Warning boxes ───────────────────────── */
+[data-testid="stInfo"] {
+  background: #EFF6FF;
+  border-left: 4px solid var(--accent-blue);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+[data-testid="stWarning"] {
+  background: #FFFBEB;
+  border-left: 4px solid var(--accent-amber);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+[data-testid="stSuccess"] {
+  background: #F0FDF4;
+  border-left: 4px solid var(--accent-emerald);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+[data-testid="stError"] {
+  background: #FFF1F2;
+  border-left: 4px solid var(--accent-rose);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* ── Progress bar ───────────────────────────────── */
+[data-testid="stProgress"] div {
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-indigo));
+  border-radius: 9999px;
+}
+
+/* ── Code blocks ────────────────────────────────── */
+code, .stCode {
+  font-family: 'DM Mono', 'Fira Code', monospace;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Scrollbar ──────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
